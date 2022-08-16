@@ -12,3 +12,11 @@
   - Drive Drive Drive?
     - record millions of miles and playback interesting failures in simulated testing.
   - All are useful methods and should be used in tandem
+
+
+# Zoox Approach
+Build cars from the ground up instead of putting sensors on cars. Leverage being an agile startup to design cars that can work better around existing infrastructure.
+
+Design Choices
+- Bidirectional Cars
+- All Wheel Steering
