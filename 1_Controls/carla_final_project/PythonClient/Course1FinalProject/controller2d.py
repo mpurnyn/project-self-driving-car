@@ -113,7 +113,11 @@ class Controller2D(object):
             Example: Accessing the value from 'v_previous' to be used
             throttle_output = 0.5 * self.vars.v_previous
         """
-        self.vars.create_var('v_previous', 0.0)
+        self.vars.create_var('prev_v', 0.0)
+        self.vars.create_var('prev_t', 0.0)
+        self.vars.create_var('prev_propotional_error', 0.0)
+        self.vars.create_var('prev_integral_error', 0.0)
+        self.vars.create_var('prev_throttle', 0.0)
 
         # Skip the first frame to store previous values properly
         if self._start_control_loop:
@@ -163,8 +167,35 @@ class Controller2D(object):
             # Change these outputs with the longitudinal controller. Note that
             # brake_output is optional and is not required to pass the
             # assignment, as the car will naturally slow down over time.
-            throttle_output = 0
-            brake_output    = 0
+
+            # PID Contstants
+            KP, KI, KD = 1.0, 0.2, 0.01
+
+            # Rename variables for easier reading
+            prev_t = self.vars.prev_t
+            prev_i_error = self.vars.prev_integral_error
+            prev_p_error = self.vars.prev_propotional_error
+            prev_throttle = self.vars.prev_throttle
+            dt = t - prev_t
+            # Outputs
+            throttle_output, brake_output = 0, 0
+
+            
+            # PID Error Calculation
+            p_error = v_desired - v
+            i_error = prev_i_error + p_error * dt
+            d_error = (p_error - prev_p_error) / dt
+
+            #### PID control
+            pid = KP * p_error + KI * i_error + KD * d_error
+
+            if pid > 0:
+                # limit throttle to [0,1]
+                throttle_output = (np.tanh(pid) + 1) / 2
+                if throttle_output - prev_throttle > 0.1:
+                    throttle_output = prev_throttle + 0.1
+            else:
+                throttle_output = 0
 
             ######################################################
             ######################################################
@@ -178,7 +209,58 @@ class Controller2D(object):
             """
             
             # Change the steer output with the lateral controller. 
-            steer_output    = 0
+            steer_output = 0
+            KE = 0.3
+
+            # Stanley Controller
+            x_wp = waypoints[0][0]
+            y_wp = waypoints[0][1]
+            prev_x_wp = waypoints[-1][0]
+            prev_y_wp = waypoints[-1][1]
+
+            dx = prev_x_wp-x_wp
+            dy = prev_y_wp-y_wp
+
+            # heading error
+            yaw_path = np.arctan2(dy, dx)
+            yaw_diff_heading = yaw_path - yaw 
+
+            # limit to [-2*Pi,2*Pi]
+            if yaw_diff_heading > np.pi:
+                yaw_diff_heading -= 2 * np.pi
+            if yaw_diff_heading < - np.pi:
+                yaw_diff_heading += 2 * np.pi
+
+            # crosstrack error
+            current_xy = np.array([x, y])
+            crosstrack_error = np.min(np.sum((current_xy - np.array(waypoints)[:, :2])**2, axis=1))
+            yaw_cross_track = np.arctan2(y-y_wp, x-x_wp)
+            yaw_path2ct = yaw_path - yaw_cross_track
+
+            # limit to [-2*Pi,2*Pi]
+            if yaw_path2ct > np.pi:
+                yaw_path2ct -= 2 * np.pi
+            if yaw_path2ct < - np.pi:
+                yaw_path2ct += 2 * np.pi
+            if yaw_path2ct > 0:
+                crosstrack_error = abs(crosstrack_error)
+            else:
+                crosstrack_error = -abs(crosstrack_error)
+            yaw_diff_crosstrack = np.arctan(KE * crosstrack_error / (v+1))
+
+            # final expected steering
+            expected_steering = yaw_diff_crosstrack + yaw_diff_heading
+
+            # limit to [-2*Pi,2*Pi]
+            if expected_steering > np.pi:
+                expected_steering -= 2 * np.pi
+            if expected_steering < - np.pi:
+                expected_steering += 2 * np.pi
+            expected_steering = min(1.22, expected_steering)
+            expected_steering = max(-1.22, expected_steering)
+
+            #update
+            steer_output = expected_steering
 
             ######################################################
             # SET CONTROLS OUTPUT
@@ -197,4 +279,8 @@ class Controller2D(object):
             current x, y, and yaw values here using persistent variables for use
             in the next iteration)
         """
-        self.vars.v_previous = v  # Store forward speed to be used in next step
+        self.vars.prev_v = v  # Store forward speed to be used in next step
+        self.vars.prev_throttle = throttle_output
+        self.vars.prev_t = t
+        self.vars.prev_propotional_error = p_error
+        self.vars.prev_integral_error = i_error
